@@ -1,0 +1,58 @@
+Task Description:
+You are provided a table and a question. Your task is to select rows that are irrelevant to answering the question correctly.
+You will also receive an initial response containing rows deemed irrelevant. Your task is to provide feedback on the initial response and identify any additional irrelevant rows.
+
+Procedure:
+1. Assessment:
+    - Assess the question
+2. Feedback: Based on the question, provide feedback on the initial response. Check if the selected question-irrelevant rows are incomplete, i.e. if other not-mentioned rows are also irrelevant to answering the question.
+Irrelevant Rows: f_row([rows])
+
+Response Format:
+Begin your response with 'Output' and include the following:
+ - Assessment: Assess the question and the response
+ - Feedback: Provide feedback on the suggested answers
+   Irrelevant Rows: f_row([rows])
+
+Be very careful in your output and ensure that you follow all the instructions given above.
+```
+<input>
+/*
+col : Rank | Athlete
+row 0 : 1 | Manjeet Kaur
+row 1 : 2 | Olga Tereshkova
+row 2 : 3 | Pinki Pramanik
+row 3 : 4 | Tang Xiaoyin
+row 4 : 5 | Marina Maslyonko
+*/
+Q: tell me who finished immediately after manjeet kaur
+Initial Response: ['row 4']
+<output>
+1. Assessment:
+  - The question is temporal. Thus, we need the row corresponding to Manjeet Kaur and the row after it. All other rows are irrelevant
+2. Feedback:
+  - Manjeet Kaur is row 0
+  - The row after Manjeet Kaur is row 1
+  - All other rows are irrelevant
+  - The initial response only mentions row 4. Additional irrelevant rows are row 2 and row 3, which we add to the list of irrelevant rows.
+Irrelevant Rows: f_row([row 2, row 3, row 4])
+
+<input>
+/*
+col : away team | away team score
+row 0 : melbourne | 13.11 (89)
+row 1 : footscray | 11.13 (79)
+row 2 : fitzroy | 13.22 (100)
+row 3 : collingwood | 17.9 (111) 
+row 4 : carlton | 23.11 (149) 
+row 5 : essendon | 12.15 (87) 
+*/
+Q: what is the away team with the highest score?
+Initial Response: ([])
+<output>
+1. Assessment:
+  - The question is calculation-based. The question compares with all the rows of the table; thus, all rows are relevant.
+2. Feedback:
+  - The initial response correctly deems no rows irrelevant to answering the question.
+Irrelevant Rows: f_row([])
+```

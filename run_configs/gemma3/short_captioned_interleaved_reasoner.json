@@ -1,0 +1,24 @@
+{
+    "engine": "vllm",
+    "vllm_model_name": "google/gemma-3-27b-it",
+    "prompt_mode": "text-image",
+    "number_of_gpus": 2,
+    "dataset": "all_multimodal_datasets",
+    "dataset_version": "captioned",
+    "caption_type": "short_with_context",
+    "load_images_for_reasoning": true,
+    "use_mmtabqa_interleaved_prompt": true,
+    "experiment_name": "gemma3-mmtabqa-captioned-short-interleaved-reasoner",
+    "run_steps": [
+        "step1",
+        "step2",
+        "step3",
+        "step4",
+        "step6"
+    ],
+    "skip_steps": [
+        "step5"
+    ],
+    "run_final_evaluation": true,
+    "include_captions_in_reasoner": true
+}

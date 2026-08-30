@@ -1,0 +1,417 @@
+"""Evaluate interleaved reasoning outputs by table type.
+
+This script walks every model folder under one or more base directories,
+loads each `mmtbench_AQ|EQ|IQ|VQ/interleaved_reasoning_output.json`,
+groups rows by the category lists in `folders.json`, and optionally runs
+LLM-as-a-judge using the same vLLM/HF/GPU defaults as the interleaved
+baseline.
+
+Set CAPTR_EVALUATION_BASE_DIRS to a path-list if you want default base directories.
+"""
+
+import argparse
+import copy
+import json
+import os
+import multiprocessing
+import sys
+from collections import defaultdict
+from datetime import datetime
+from importlib import import_module
+from pathlib import Path
+from typing import Dict, List
+
+from utils.runtime_env import configure_runtime_environment, load_repo_dotenv
+
+
+configure_runtime_environment()
+load_repo_dotenv()
+
+multiprocessing.set_start_method("spawn", force=True)
+os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
+CACHE_BASE_DIR = os.environ["XDG_CACHE_HOME"]
+SHARED_HF_CACHE = os.environ["HUGGINGFACE_HUB_CACHE"]
+LOCAL_HF_CACHE = os.environ["HF_HOME"]
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+get_vllm_generator = import_module("baselines.baselines_utils").get_vllm_generator
+
+
+def _env_list(name: str) -> List[str]:
+    raw_value = os.getenv(name, "")
+    if not raw_value:
+        return []
+    return [value for value in raw_value.split(os.pathsep) if value]
+
+
+DEFAULT_BASE_DIRS = _env_list("CAPTR_EVALUATION_BASE_DIRS")
+
+
+def load_folders_json(path: str) -> Dict[str, List[str]]:
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def load_json_file(path: Path) -> Dict[str, dict]:
+    if not path.exists():
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def resolve_interleaved_path(model_dir: Path, type_name: str) -> Path | None:
+    candidates = [
+        model_dir / type_name / "interleaved_reasoning_output.json",
+        model_dir / f"{type_name}_interleaved.json",
+        model_dir / f"{type_name}.json",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def extract_table_id(ori_data_item: dict) -> str:
+    # Prefer explicit table_id if present
+    if "table_id" in ori_data_item:
+        return ori_data_item["table_id"]
+    # Some items use nested metadata or encoded id like "different_gases_2"
+    if "id" in ori_data_item and isinstance(ori_data_item["id"], str):
+        # strip trailing numeric suffixes after last underscore
+        parts = ori_data_item["id"].rsplit("_", 1)
+        if len(parts) == 2 and parts[1].isdigit():
+            return parts[0]
+        return ori_data_item["id"]
+    # fallback
+    return ""
+
+
+def collate(base_dir: str, types: List[str]) -> Dict[str, dict]:
+    concatenated = {}
+    model_dir = Path(base_dir)
+    for t in types:
+        source_path = resolve_interleaved_path(model_dir, t)
+        if source_path is None:
+            continue
+        items = load_json_file(source_path)
+        if not items:
+            continue
+        # Normalize the type name for consistent grouping across variants
+        normalized_type = normalize_type_name(t)
+        # ensure unique keys across types by prefixing with normalized type if needed
+        for k, v in items.items():
+            new_key = k
+            if new_key in concatenated:
+                new_key = f"{normalized_type}__{k}"
+            concatenated[new_key] = v
+    return concatenated
+
+
+def iter_model_dirs(base_dir: str, verbose: bool = True) -> List[Path]:
+    root = Path(base_dir)
+    if not root.exists():
+        if verbose:
+            print(f"⚠️  Base directory not found: {base_dir}")
+        return []
+    dirs = [child for child in root.iterdir() if child.is_dir()]
+    if verbose:
+        print(f"✅ Found {len(dirs)} subdirectories in {base_dir}")
+    return dirs
+
+
+def find_type_folders(model_dir: Path, types: List[str], verbose: bool = True) -> List[str]:
+    found = []
+    for folder_name in types:
+        json_path = resolve_interleaved_path(model_dir, folder_name)
+        if json_path is not None:
+            found.append(folder_name)
+    if verbose and found:
+        print(f"  📂 {model_dir.name}: {', '.join(found)}")
+    elif verbose:
+        print(f"  ❌ {model_dir.name}: no matching type folders")
+    return found
+
+
+def normalize_type_name(folder_name: str) -> str:
+    """Normalize MMTabReal_AQ, mmtbench_AQ, mmtabqa_AQ to 'AQ' for consistent grouping."""
+    # Extract just the question type (AQ, EQ, IQ, VQ)
+    parts = folder_name.split("_")
+    if len(parts) >= 2:
+        return parts[-1].upper()  # e.g., "AQ", "EQ", "IQ", "VQ"
+    return folder_name
+
+
+def group_by_category(concatenated: Dict[str, dict], folders_map: Dict[str, List[str]]) -> Dict[str, list]:
+    # Build reverse lookup: table_id -> list of categories that contain it
+    table_to_categories = defaultdict(list)
+    for cat, table_list in folders_map.items():
+        for tid in table_list:
+            table_to_categories[tid].append(cat)
+
+    results = {cat: [] for cat in folders_map.keys()}
+    results["unmapped"] = []
+
+    for k, v in concatenated.items():
+        try:
+            ori = v.get("ori_data_item", {})
+            tid = extract_table_id(ori)
+        except Exception:
+            tid = ""
+
+        matched = False
+        if tid and tid in table_to_categories:
+            for cat in table_to_categories[tid]:
+                results[cat].append({"key": k, "table_id": tid, "item": v})
+            matched = True
+
+        if not matched:
+            results["unmapped"].append({"key": k, "table_id": tid, "item": v})
+
+    return results
+
+
+def build_llm_judge_batch_request(entry: dict) -> dict:
+    output = entry["item"]
+    ori_data_item = output.get("ori_data_item", {})
+    return {
+        "oracle_answer_list": ori_data_item.get("answer_text", []),
+        "our_answer": output["generations"][0],
+        "question": ori_data_item.get("question", ""),
+        "page_title": ori_data_item.get("table_with_metadata", {}).get("page_title", ""),
+        "section_title": ori_data_item.get("table_with_metadata", {}).get("section_title", ""),
+    }
+
+
+def maybe_strip_step_2(entry: dict) -> dict:
+    output = copy.deepcopy(entry)
+    generations = output.get("generations", [])
+    if generations:
+        first_generation = generations[0]
+        if "Step 2 :" in first_generation:
+            generations[0] = first_generation.split("Step 2 :")[-1].strip()
+        elif "Step 2:" in first_generation:
+            generations[0] = first_generation.split("Step 2:")[-1].strip()
+        output["generations"] = generations
+    return output
+
+
+def build_llm_judge_request_and_prompt(entry: dict, generator) -> dict:
+    output = maybe_strip_step_2(entry)
+    request = build_llm_judge_batch_request({"item": output})
+    oracle_answer = request["oracle_answer_list"][0] if request["oracle_answer_list"] else ""
+    table_metadata = "Table in context of unknown table."
+    if request["page_title"] and request["section_title"]:
+        table_metadata = f"Table related to {request['section_title']} in context of {request['page_title']}."
+    elif request["page_title"]:
+        table_metadata = f"Table in context of {request['page_title']}."
+
+    judge_prompt = generator._create_llm_judge_prompt(
+        request["question"],
+        oracle_answer,
+        request["our_answer"],
+        table_metadata,
+    )
+    return {
+        "request": request,
+        "judge_prompt": judge_prompt,
+    }
+
+
+def parse_judge_output(judgment: str) -> int:
+    normalized = judgment.strip().lower()
+    correct_index = normalized.rfind("[[correct]]")
+    incorrect_index = normalized.rfind("[[incorrect]]")
+    if correct_index != -1 or incorrect_index != -1:
+        return 1 if correct_index > incorrect_index else 0
+    return 0
+
+
+def run_llm_as_judge(concatenated: Dict[str, dict], generator) -> Dict[str, dict]:
+    evaluation_dict = {}
+    key_order = []
+    for key, output in concatenated.items():
+        prepared = build_llm_judge_request_and_prompt(output, generator)
+        evaluation_dict[str(len(key_order))] = {
+            "content": [{"type": "text", "text": prepared["judge_prompt"]}],
+            "key": key,
+            "request": prepared["request"],
+        }
+        key_order.append(key)
+
+    if not evaluation_dict:
+        return {}
+
+    sampling_args = type(
+        "Args",
+        (),
+        {
+            "sampling_n": 1,
+            "temperature": 0.1,
+            "top_p": 1.0,
+            "max_generation_tokens": 2048,
+        },
+    )()
+
+    generator.generate_batch_pass(evaluation_dict, sampling_args)
+
+    outputs_by_key = {}
+    for idx, key in enumerate(key_order):
+        generated_text = evaluation_dict[str(idx)]["generations"][0]
+        outputs_by_key[key] = {
+            "score": parse_judge_output(generated_text),
+            "response": generated_text,
+        }
+
+    return outputs_by_key
+
+
+def write_out(path: str, data: dict) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def create_generator(model_name: str, num_gpus: int, gpu_memory_utilization: float):
+    return get_vllm_generator(
+        model_name=model_name,
+        prompt_mode="text-image",
+        limit_mm_per_prompt={"image": 324},
+        context_window_size=90000,
+        number_of_gpus=num_gpus,
+        gpu_memory_utilization=gpu_memory_utilization,
+    )
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--base_dirs",
+        nargs="+",
+        default=None,
+        help="One or more base folders containing model subfolders; defaults to CAPTR_EVALUATION_BASE_DIRS",
+    )
+    parser.add_argument(
+        "--types",
+        nargs="*",
+        default=[
+            "mmtbench_AQ", "mmtbench_EQ", "mmtbench_IQ", "mmtbench_VQ",
+            "MMTabReal_AQ_interleaved", "MMTabReal_EQ_interleaved", "MMTabReal_IQ_interleaved", "MMTabReal_VQ_interleaved",
+            "mmtabqa_AQ", "mmtabqa_EQ", "mmtabqa_IQ", "mmtabqa_VQ",
+        ],
+        help="Question-type subfolders to include; defaults to all naming variants",
+    )
+    parser.add_argument("--out_file", default="evaluation_results_by_category.json", help="Output JSON file")
+    parser.add_argument("--folders_json", default=os.getenv("FOLDERS_JSON", "folders.json"), help="Path to folders.json")
+    parser.add_argument(
+        "--judge_model",
+        default=os.getenv("CAPTR_JUDGE_MODEL", "google/gemma-3-27b-it"),
+        help="Model to use for LLM-as-a-judge",
+    )
+    parser.add_argument("--num_gpus", type=int, default=1, help="Number of GPUs for the judge model")
+    parser.add_argument(
+        "--gpu_memory_utilization",
+        type=float,
+        default=0.85,
+        help="GPU memory utilization for the judge model",
+    )
+    parser.add_argument(
+        "--use_llm_as_judge",
+        action="store_true",
+        help="Run the existing LLM-as-a-judge after grouping",
+    )
+
+    args = parser.parse_args()
+    base_dirs = args.base_dirs or DEFAULT_BASE_DIRS
+    if not base_dirs:
+        raise ValueError("Provide --base_dirs or set CAPTR_EVALUATION_BASE_DIRS.")
+
+    folders_map = load_folders_json(args.folders_json)
+    all_model_results = {}
+    
+    # Load existing results if output file exists
+    if os.path.exists(args.out_file):
+        with open(args.out_file, "r", encoding="utf-8") as f:
+            existing_data = json.load(f)
+            all_model_results = existing_data.get("models", {})
+            print(f"✅ Loaded {len(all_model_results)} existing model results from {args.out_file}")
+    
+    # Initialize the judge generator once if needed
+    generator = None
+    model_name_short = None
+    if args.use_llm_as_judge:
+        print("Initializing LLM-as-a-judge generator...")
+        generator, model_name_short = create_generator(
+            model_name=args.judge_model,
+            num_gpus=args.num_gpus,
+            gpu_memory_utilization=args.gpu_memory_utilization,
+        )
+        print("✅ Judge generator ready. Processing model folders...")
+
+    new_models_processed = 0
+    for base_dir in base_dirs:
+        print(f"\n📂 Scanning {base_dir}...")
+        for model_dir in iter_model_dirs(base_dir, verbose=True):
+            model_key = str(model_dir)
+            # Skip if already processed
+            if model_key in all_model_results:
+                print(f"  ⏭️  {model_dir.name}: already processed, skipping")
+                continue
+            
+            type_folders = find_type_folders(model_dir, args.types, verbose=True)
+            if not type_folders:
+                continue
+
+            concatenated = collate(str(model_dir), type_folders)
+            grouped = group_by_category(concatenated, folders_map)
+
+            model_result = {
+                "source_base_dir": base_dir,
+                "model_dir": str(model_dir),
+                "concatenated_count": len(concatenated),
+                "grouped": grouped,
+            }
+
+            if args.use_llm_as_judge and generator and concatenated:
+                judge_results_by_key = run_llm_as_judge(concatenated, generator)
+                acc = sum(result["score"] for result in judge_results_by_key.values())
+                total_samples = len(judge_results_by_key)
+                accuracy = 100 * acc / total_samples if total_samples else 0.0
+
+                for bucket in grouped.values():
+                    if not isinstance(bucket, list):
+                        continue
+                    for entry in bucket:
+                        key = entry.get("key")
+                        if key in judge_results_by_key:
+                            entry["judge_score"] = judge_results_by_key[key]["score"]
+                            entry["judge_response"] = judge_results_by_key[key]["response"]
+                            entry["judge_key"] = f"{entry.get('table_id', '')}__{key}"
+
+                model_result["llm_as_a_judge"] = {
+                    "model_name": model_name_short,
+                    "accuracy": accuracy,
+                    "correct": acc,
+                    "total": total_samples,
+                    "judge_results_by_key": judge_results_by_key,
+                }
+
+
+            all_model_results[str(model_dir)] = model_result
+            new_models_processed += 1
+
+    output_payload = {
+        "created_at": datetime.now().isoformat(),
+        "folders_json": args.folders_json,
+        "model_count": len(all_model_results),
+        "models": all_model_results,
+    }
+    write_out(args.out_file, output_payload)
+    print(f"\n✅ Wrote {args.out_file} with {len(all_model_results)} total models ({new_models_processed} new).")
+
+
+if __name__ == "__main__":
+    main()

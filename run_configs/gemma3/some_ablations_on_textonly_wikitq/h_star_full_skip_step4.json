@@ -1,0 +1,20 @@
+{
+    "engine": "vllm",
+    "vllm_model_name": "google/gemma-3-27b-it",
+    "prompt_mode": "text-image",
+    "number_of_gpus": 2,
+    "use_batch_generation": true,
+    "dataset": "wikitq",
+    "experiment_name": "gemma3-wikitq-full-hstar-skip-step4",
+    "run_steps": [
+        "step1",
+        "step2",
+        "step3",
+        "step5",
+        "step6"
+    ],
+    "skip_steps": [
+        "step4"
+    ],
+    "run_final_evaluation": true
+}

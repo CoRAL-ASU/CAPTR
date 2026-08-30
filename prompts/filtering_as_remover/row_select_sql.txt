@@ -1,0 +1,121 @@
+You are given the table schema and the table, along with the corresponding statement.
+Write a simple SQLite program for selecting rows that are irrelevant to answering the question correctly.
+The SQLite program should not answer the question. The selected rows will later be removed from the table.
+Write a simple but correct SQLite program.
+
+Procedure:
+  1. Decompose: Think about attributes that we definitely do not need to answer the main question.
+  2. Retrieval: Generate an SQLite program for each subtask and then combine using only an 'OR' clause.
+
+Response Format:
+Begin your response with 'Output: ' and include all the following components:
+ - Decompose: Divide the question into smaller, manageable sub-tasks; one task for each condition that filters out irrelevant rows
+ - Retrieval: A basic SQLite program for each condition, followed by a combined SQLite
+
+**NOTE**
+- Use 'OR' to combine conditions.
+- You don't need to specify column names in your SQLite program since we only care about identifying irrelevant rows.
+- The SQLite program must be only of the format: SELECT * FROM w WHERE <conditions>;
+- Do not use COUNT() clause
+
+Be very careful, think and ensure that all the above instructions are followed, and only then return your response.
+```
+<input>
+CREATE TABLE British_Records_in_Athletics(
+	row_id int,
+	event text,
+	place text);
+
+/*
+3 example rows:
+SELECT * FROM British_Records_in_Athletics LIMIT 3;
+row_id	event	place
+0	5 km	søfteland , norway
+1	5 miles	york , united kingdom
+2	10 km	burrator , united kingdom
+*/
+columns: ['row_id', 'event', 'place']
+Q: how many events took place within the United Kingdom?
+<output>
+1. Decompose:
+ - Part 1: Since the question asks specifically about events within the United Kingdom, all rows with events not in the United Kingdom are irrelevant.
+ # The SQLite program must be only of the format: SELECT * FROM w WHERE <conditions>; 
+   SELECT * FROM w WHERE place NOT LIKE '%united kingdom%';
+2. Retrieval:
+   SQL: SELECT * FROM w WHERE place NOT LIKE '%united kingdom%';
+
+<input>
+CREATE TABLE Fabrice Santoro(
+	row_id int,
+	name text,
+	career\nwin-loss text)
+/*
+3 example rows:
+SELECT * FROM w LIMIT 3;
+row_id	name  career\nwin-loss
+0	australian open	22–18
+1	french open	17–20
+2	wimbledon	11–14
+*/
+columns : ['row_id', 'name', 'career\nwin-loss']
+Q: did he win more at the Australian Open or indian wells?
+<output>
+1. Decompose:
+ - Part 1: Rows about the French Open are irrelevant, so filter them out:
+   SELECT * FROM w WHERE name = 'french open';
+ - Part 2: Rows about Wimbledon are irrelevant, so filter them out:
+   SELECT * FROM w WHERE name = 'wimbledon';
+2. Retrieval:
+ # Always use 'OR' to combine the conditions from #1, #2
+   SQL: SELECT * FROM w WHERE name = 'french open' OR name = 'wimbledon';
+
+<input>
+CREATE TABLE Playa_de_Oro_International_Airport(
+  row_id int,
+  city text,
+  passengers text,
+  year text)
+/*
+3 example rows:
+SELECT * FROM Playa_de_Oro_International_Airport LIMIT 3;
+row_id  city  passengers  year
+0 chicago 14,749  2013
+1 houston 5,465  2014
+2 calgary 3,761  2013
+*/
+Q: how many more passengers flew to Chicago than to Saskatoon from Manzanillo airport in 2013?
+<output>
+Take a deep breath and work step by step.
+1. Decompose:
+ - Part 1: Values that are not from 2013 cannot be relevant to answer the question
+   SELECT * FROM w WHERE year != '2013';
+ - Part 2: Rows where the city is not Chicago or Saskatoon are irrelevant
+   SELECT * FROM w WHERE city NOT LIKE '%saskatoon%' AND city NOT LIKE '%los angeles%';
+2. Retrieval:
+   SQL: SELECT * FROM w WHERE year != '2013' OR (city NOT LIKE '%saskatoon%' AND city NOT LIKE '%los angeles%');
+
+<input>
+CREATE TABLE Electricity in Sri Lanka(
+	row_id int,
+	filledcolumnname text,
+	2010 int,
+	2012 int)
+/*
+3 example rows:
+SELECT * FROM w LIMIT 3;
+row_id	filledcolumnname	2010	2012
+0	hydro power		1382	1584
+1	thermal	1155	1390	1638
+2	other renewables	45	90
+*/
+columns: ['row_id', 'filledcolumnname', '2010', '2012']
+Q: did the hydro power increase or decrease from 2010 to 2012?
+<output>
+1. Decompose:
+ - Part 1: Rows about thermal power are irrelevant
+   SELECT * FROM w WHERE filledcolumnname = 'thermal';
+ - Part 2: Rows about other renewables are irrelevant
+   SELECT * FROM w WHERE filledcolumnname = 'other renewables';
+2. Retrieval:
+   SQL: SELECT * FROM w WHERE filledcolumnname = 'thermal' OR filledcolumnname = 'other renewables';
+```

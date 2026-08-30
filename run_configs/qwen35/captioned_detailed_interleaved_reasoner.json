@@ -1,0 +1,27 @@
+{
+    "engine": "vllm",
+    "vllm_model_name": "Qwen/Qwen3.5-27B",
+    "prompt_mode": "text-image",
+    "number_of_gpus": 1,
+    "gpu_memory_utilization": 0.85,
+    "dataset": "all_multimodal_datasets",
+    "dataset_version": "captioned",
+    "caption_type": "detailed",
+    "load_images_for_reasoning": false,
+    "use_mmtabqa_interleaved_prompt": true,
+    "experiment_name": "qwen3.5-mmtabqa-captioned-detailed-interleaved-reasoner",
+    "run_steps": [
+        "step1",
+        "step2",
+        "step3",
+        "step4",
+        "step6"
+    ],
+    "skip_steps": [
+        "step5"
+    ],
+    "run_final_evaluation": true,
+    "include_captions_in_reasoner": true,
+    "reasoner_answer_only": true,
+    "n_examples": 700
+}

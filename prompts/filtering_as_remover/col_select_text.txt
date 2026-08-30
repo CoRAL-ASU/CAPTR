@@ -1,0 +1,75 @@
+Task Description:
+You are provided a table and a question. Your task is to select columns that are irrelevant to answering the question correctly. The table created from this will be used to answer the question. Please ensure that your final answer matches your reasoning. You do not need to mark the 'row_id' column as irrelevant, as this index is always kept. Your task is to perform the following actions:
+
+1. Plan:
+ - Summarize the goal of the question.
+ - Identify values and ranges from the table which are irrelevant to answering the question. If you are unsure whether a column is irrelevant, do not mark it as irrelevant.
+ - Make use of your domain knowledge to identify irrelevant columns.
+2. Retrieval:
+ - Identify all table columns irrelevant to answering the question.
+ - Include only the column names from the column list, nothing else
+
+Response Format:
+Your response must begin with 'Output' and must always include all the components below:
+- Plan: Write the plan for identifying the irrelevant columns along with a reasoning chain
+- Retrieval: Based on the plan, identify the irrelevant columns followed by a reasoning chain
+ Evidence: f_col([column names])
+Please output the column names only, no other details inside f_col.
+```
+<input>
+/*
+row: row 1 | row 2 | row 3 | row 4 | row 5
+pick: 1 | 2 | 3 | 4 | 5
+player: jay washington | alex cabagnot | dennis miranda | ato ular | kameron vales
+country of origin: united states | united states | philippines | philippines | united states
+pba team: air21 express | sta lucia realtors | coca-cola tigers | blackwater bossing | converge fiberxers
+college: eckerd | hawaii - hilo | feu | mpbl | ateneo
+*/
+Q: Which college has the most players belonging to asian countries?
+<output>
+1. Plan:
+ a. The question asks to identify the college that has the most players from an asian country of origin.
+ b. To answer this, we do not need the information from the 'pick' column, as the pick is not related to any part of the question.
+ c. We also do not need the 'pba team' column since the team is not related to the country of origin.
+2. Retrieval:
+Explanation: As they are not relevant for identifying the colleges, their players and the players' places of birth, we can drop the columns 'pick' and 'pba team'.
+# Include only the columns names from the column list, nothing else
+Evidence: f_col([pick, pba team])
+
+<input>
+/*
+row :  row 0 | row 1 | row 2
+season : 2003 | 2004 | 2010
+division : 1 | 1 | 1
+number of teams : 12 | 13 | 13
+pos. :  11 | 10 | 8
+fa cup : quarter final | round of 32 | quarter final
+afc cl : none | none | none
+*/
+Q: how far did they make it in the fa cup after 2009?
+<output>
+1. Plan:
+ a. To answer the question of which progress the team made in the FA Cup after 2009, the number of participating teams is irrelevant, and so is the division.
+ b. It is unclear whether the question wants the 'fa cup' stage or the position 'pos.', so we keep both these relevant columns
+2. Retrieval:
+Explanation: The question requires information exclusively from seasons after 2009, hence the 'season' column is essential for temporal filtering. 'fa cup' and 'pos.' could be both relevant. 'division', 'number of teams' and 'afc cl' are irrelevant to answer the question.
+Evidence: f_col([division, number of teams, afc cl])
+
+<input>
+/*
+rank: 1 | 2 | 3 | 4 | 5
+lane: 6 | 5 | 4 | 1 | 8
+athlete: manjeet kaur | olga tereshkova | pinki pramanik | tang xiaoyin | marina maslyonko
+time: 52.17 | 51.86 | 53.06 | 53.66 | 53.99
+country: india | kazakhstan | india | china | kazakhstan
+*/
+Q: who finished immediately after manjeet kaur?
+<output>
+1. Plan:
+ a. The question wants us to find the athlete who finished immediately after Manjeet Kaur.
+ b. To identify the order in which the athletes finished, we do not need the lane and time.
+ c. The players' country is also not relevant to the question.
+2. Retrieval:
+Explanation: To get the finishing order of the athletes, we do not need the 'lane', 'time' and 'country'
+Evidence: f_col([lane, time, country])
+```
